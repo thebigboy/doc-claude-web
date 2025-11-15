@@ -1,0 +1,14 @@
+{
+  "name": "claude-code-web",
+  "version": "1.0.3",
+  "description": "Web UI for Claude Code based on local ERP codebase",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "sqlite3": "^5.1.7",
+    "cookie-parser": "^1.4.6"
+  }
+}

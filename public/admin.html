@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>管理后台 - Claude Code Web</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI';
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      overflow: hidden;
+      background: #f5f5f5;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 500;
+    }
+
+    .back-btn {
+      padding: 8px 16px;
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.3);
+      color: #fff;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+
+    .back-btn:hover {
+      background: rgba(255,255,255,0.3);
+    }
+
+    .container {
+      display: flex;
+      height: calc(100vh - 56px);
+    }
+
+    /* 左侧用户列表 */
+    .user-list {
+      width: 320px;
+      background: #fff;
+      border-right: 1px solid #e0e0e0;
+      overflow-y: auto;
+    }
+
+    .user-list-header {
+      padding: 16px;
+      border-bottom: 1px solid #e0e0e0;
+      background: #fafafa;
+      font-weight: 500;
+      font-size: 14px;
+      color: #333;
+    }
+
+    .user-item {
+      padding: 16px;
+      border-bottom: 1px solid #f0f0f0;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .user-item:hover {
+      background: #f5f5f5;
+    }
+
+    .user-item.active {
+      background: #e8eaf6;
+      border-left: 3px solid #667eea;
+    }
+
+    .user-name {
+      font-size: 15px;
+      font-weight: 500;
+      color: #333;
+      margin-bottom: 6px;
+    }
+
+    .user-meta {
+      font-size: 12px;
+      color: #888;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .empty-state {
+      padding: 40px 20px;
+      text-align: center;
+      color: #999;
+      font-size: 14px;
+    }
+
+    /* 右侧聊天记录 */
+    .chat-records {
+      flex: 1;
+      background: #fafafa;
+      overflow-y: auto;
+      padding: 20px;
+    }
+
+    .chat-records-header {
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+
+    .chat-records-header h2 {
+      margin: 0;
+      font-size: 18px;
+      color: #333;
+    }
+
+    .chat-card {
+      width: 100%;
+      background: #fff;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .chat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .chat-time {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .chat-duration {
+      font-size: 12px;
+      color: #667eea;
+      font-weight: 500;
+    }
+
+    .chat-section {
+      margin-bottom: 12px;
+    }
+
+    .chat-label {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 6px;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .chat-question {
+      background: #e3f2fd;
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #333;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .chat-answer {
+      background: #f5f5f5;
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #333;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .placeholder {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+ /*     height: 100%;*/
+      color: #999;
+      font-size: 15px;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .placeholder svg {
+      width: 80px;
+      height: 80px;
+      opacity: 0.3;
+    }
+
+    /* 加载状态 */
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #888;
+      font-size: 14px;
+    }
+
+    /* 滚动条样式 */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #f1f1f1;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #ccc;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #999;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Claude Code Web - 管理后台</h1>
+    <button class="back-btn" onclick="window.location.href='/'">返回首页</button>
+  </div>
+
+  <div class="container">
+    <!-- 左侧用户列表 -->
+    <div class="user-list">
+      <div class="user-list-header">
+        用户列表
+      </div>
+      <div id="userListContainer"></div>
+    </div>
+
+    <!-- 右侧聊天记录 -->
+    <div class="chat-records">
+      <div id="chatRecordsContainer" class="placeholder">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+        </svg>
+        <div>请从左侧选择用户查看会话记录</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const userListContainer = document.getElementById('userListContainer');
+    const chatRecordsContainer = document.getElementById('chatRecordsContainer');
+
+    let currentUsername = null;
+
+    // 加载用户列表
+    async function loadUsers() {
+      userListContainer.innerHTML = '<div class="loading">加载中...</div>';
+
+      try {
+        const res = await fetch('/api/admin/users');
+        const data = await res.json();
+
+        if (data.users && data.users.length > 0) {
+          renderUserList(data.users);
+        } else {
+          userListContainer.innerHTML = '<div class="empty-state">暂无会话记录</div>';
+        }
+      } catch (err) {
+        console.error('加载用户列表失败:', err);
+        userListContainer.innerHTML = '<div class="empty-state">加载失败</div>';
+      }
+    }
+
+    // 渲染用户列表
+    function renderUserList(users) {
+      userListContainer.innerHTML = '';
+
+      users.forEach(user => {
+        const userItem = document.createElement('div');
+        userItem.className = 'user-item';
+        if (currentUsername === user.username) {
+          userItem.classList.add('active');
+        }
+
+        const lastTime = new Date(user.last_chat_time).toLocaleString('zh-CN', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+
+        userItem.innerHTML = `
+          <div class="user-name">${escapeHtml(user.username)}</div>
+          <div class="user-meta">
+            <span>共 ${user.chat_count} 次会话</span>
+            <span>${lastTime}</span>
+          </div>
+        `;
+
+        userItem.addEventListener('click', () => {
+          loadChats(user.username);
+        });
+
+        userListContainer.appendChild(userItem);
+      });
+    }
+
+    // 加载聊天记录
+    async function loadChats(username) {
+      currentUsername = username;
+
+      // 更新用户列表选中状态
+      document.querySelectorAll('.user-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      event.currentTarget.classList.add('active');
+
+      chatRecordsContainer.innerHTML = '<div class="loading">加载中...</div>';
+
+      try {
+        const res = await fetch(`/api/admin/chats/${encodeURIComponent(username)}`);
+        const data = await res.json();
+
+        if (data.chats && data.chats.length > 0) {
+          renderChats(data.chats, data.username);
+        } else {
+          chatRecordsContainer.innerHTML = '<div class="empty-state">该用户暂无会话记录</div>';
+        }
+      } catch (err) {
+        console.error('加载会话记录失败:', err);
+        chatRecordsContainer.innerHTML = '<div class="empty-state">加载失败</div>';
+      }
+    }
+
+    // 渲染聊天记录
+    function renderChats(chats, username) {
+      chatRecordsContainer.innerHTML = '';
+
+      const header = document.createElement('div');
+      header.className = 'chat-records-header';
+      header.innerHTML = `<h2>${escapeHtml(username)} 的会话记录（共 ${chats.length} 条）</h2>`;
+      chatRecordsContainer.appendChild(header);
+
+      chats.forEach((chat, index) => {
+        const card = document.createElement('div');
+        card.className = 'chat-card';
+
+        const chatTime = new Date(chat.created_at).toLocaleString('zh-CN', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+
+        card.innerHTML = `
+          <div class="chat-header">
+            <span class="chat-time">${chatTime}</span>
+            <span class="chat-duration">耗时 ${chat.duration_seconds || 0} 秒</span>
+          </div>
+
+          <div class="chat-section">
+            <div class="chat-label">问题 #${chats.length - index}</div>
+            <div class="chat-question">${escapeHtml(chat.question)}</div>
+          </div>
+
+          <div class="chat-section">
+            <div class="chat-label">回答</div>
+            <div class="chat-answer">${escapeHtml(chat.answer || '(无回答)')}</div>
+          </div>
+        `;
+
+        chatRecordsContainer.appendChild(card);
+      });
+    }
+
+    // HTML 转义
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // 页面加载时初始化
+    loadUsers();
+  </script>
+</body>
+</html>
