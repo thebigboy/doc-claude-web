@@ -7,8 +7,11 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "cookie-parser": "^1.4.6",
     "express": "^4.19.2",
-    "sqlite3": "^5.1.7",
-    "cookie-parser": "^1.4.6"
+    "express-session": "^1.18.2",
+    "multer": "^2.0.2",
+    "pdf-parse": "^1.1.1",
+    "sqlite3": "^5.1.7"
   }
 }

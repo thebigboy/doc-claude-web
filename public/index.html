@@ -167,6 +167,7 @@
   <div class="user-info">
     <span>当前用户：<strong id="currentUser">--</strong></span>
     <button class="logout-btn" id="logoutBtn">退出登录</button>
+    <a href="/admin/" target="_blank" style="font-size: 11px; color: #4a90e2; text-decoration: none; text-align: center;">管理后台</a>
   </div>
 </div>
 <script>
@@ -183,13 +184,17 @@
   <div id="chat" class="chat-container"></div>
 
   <div class="input-area">
+    <label style="padding-bottom:20px;font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; color: #666;">
+      <input type="checkbox" id="useKnowledgeBase" style="width: auto; height: auto; cursor: pointer;">
+      <span>使用知识库</span>
+    </label>
     <textarea id="question" rows="2" placeholder="输入问题，立即为你解答..."></textarea>
-    <button id="askBtn">
-      发送</br>
-      (ctrl+Enter)
-    </button>
-
-
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <button id="askBtn">
+        发送</br>
+        (ctrl+Enter)
+      </button>
+    </div>
   </div>
 </div>
 
@@ -372,12 +377,13 @@
     const question = qInput.value.trim();
     if (!question) return;
 
+    const useKnowledgeBase = document.getElementById('useKnowledgeBase').checked;
     const startTime = Date.now();
 
     const userMsg = {
       id: Date.now() + '_user',
       role: 'user',
-      content: question,
+      content: question + (useKnowledgeBase ? ' [使用知识库]' : ''),
       time: timestamp()
     };
     messages.push(userMsg);
@@ -411,7 +417,7 @@
       const res = await fetch('/api/ask', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ question })
+        body: JSON.stringify({ question, useKnowledgeBase })
       });
 
       // 检查是否未登录
