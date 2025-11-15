@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Claude Code Web 对话（v3 流式版）</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI';
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    h1 { font-size: 24px; margin: 0 0 8px; }
+    .header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .user-info {
+      font-size: 13px;
+      color: #666;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logout-btn {
+      padding: 4px 12px;
+      font-size: 12px;
+      background: #f44336;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      height: auto;
+      width: auto;
+    }
+    .logout-btn:hover {
+      background: #d32f2f;
+    }
+    .meta { font-size: 12px; color: #888; margin-bottom: 8px; }
+    .status { font-size: 13px; color: #666; margin-bottom: 8px; min-height: 1.2em; }
+    .status.error { color: #c00; }
+
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .chat-container {
+      flex: 1;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px;
+      overflow-y: auto;
+      background: #fafafa;
+      margin-bottom: 12px;
+    }
+
+    .message-row { display: flex; margin-bottom: 12px; }
+    .message-row.user { justify-content: flex-end; }
+    .message-row.assistant { justify-content: flex-start; }
+
+    .avatar {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: #ddd;
+      display: flex; justify-content: center; align-items: center;
+      color: #fff; margin: 0 8px;
+    }
+    .avatar.user { background: #4a90e2; }
+    .avatar.assistant { background: #7b8a8b; }
+
+    .bubble {
+      background: #fff;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #e0e0e0;
+      font-size: 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      position: relative;
+    }
+    .bubble.user {
+      background: #4a90e2;
+      color: #fff;
+      border: none;
+    }
+
+    .bubble.streaming::after {
+      content: '▋';
+      animation: blink 1s infinite;
+      margin-left: 2px;
+    }
+
+    @keyframes blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+
+    .left-timestamp{
+        font-size: 11px;
+        color: #999;
+        margin-top: 6px;
+      text-align: left;
+    }
+    .right-timestamp{
+        font-size: 11px;
+        color: #999;
+        margin-top: 6px;
+       text-align: right;
+    }
+
+    .bubble.loading {
+      font-style: italic;
+      font-weight: 600;
+      color: #666 !important;
+      background: #f0f0f0 !important;
+      border: 1px solid #ddd !important;
+      font-size: 14px !important;
+      min-width: 240px;
+    }
+
+    .input-area {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      padding-bottom: 4px;
+    }
+    textarea {
+      flex: 1;
+      font-family: inherit;
+      font-size: 14px;
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      resize: none;
+      min-height: 48px;
+      max-height: 120px;
+    }
+    button {
+      width: 120px;
+      padding: 2px 8px;
+      font-size: 14px;
+      border-radius: 6px;
+      border: none;
+      background: #4a90e2;
+      color: #fff;
+      height: 50px;
+      cursor: pointer;
+    }
+    button:disabled { background: #b0c8ea; }
+
+    .version-tag {
+      font-size: 11px;
+      color: #fff;
+      background: #7b8a8b;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 8px;
+    }
+  </style>
+</head>
+<body>
+<div class="header-bar">
+  <h1 id="h1Title">loading...<span class="version-tag">v3 流式输出</span></h1>
+  <div class="user-info">
+    <span>当前用户：<strong id="currentUser">--</strong></span>
+    <button class="logout-btn" id="logoutBtn">退出登录</button>
+    <a href="/admin/" target="_blank" style="font-size: 11px; color: #4a90e2; text-decoration: none; text-align: center;">管理后台</a>
+    <a href="/" style="font-size: 11px; color: #999; text-decoration: none; text-align: center;">返回标准版</a>
+  </div>
+</div>
+<script>
+  document.getElementById('h1Title').firstChild.textContent = document.title;
+</script>
+<p class="meta">
+  绑定项目目录：<code id="codePath">实始化中</code><br />
+  后端命令：<code>echo "你的问题" | /opt/homebrew/bin/claude -p</code><br />
+  <span style="color: #4caf50; font-weight: 500;">✨ v3 版本支持流式输出并沿用标准版 UI</span>
+</p>
+<div id="serverStatus" class="status">检测中</div>
+<div id="status" class="status"></div>
+
+<div class="main">
+  <div id="chat" class="chat-container"></div>
+
+  <div class="input-area">
+    <label style="padding-bottom:20px;font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; color: #666;">
+      <input type="checkbox" id="useKnowledgeBase" style="width: auto; height: auto; cursor: pointer;">
+      <span>使用知识库</span>
+    </label>
+    <textarea id="question" rows="2" placeholder="输入问题，立即为你解答..."></textarea>
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <button id="askBtn">
+        发送</br>
+        (ctrl+Enter)
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const btn = document.getElementById('askBtn');
+  const qInput = document.getElementById('question');
+  const chat = document.getElementById('chat');
+  const status = document.getElementById('status');
+  const serverStatus = document.getElementById('serverStatus');
+  const codePath = document.getElementById('codePath');
+  const currentUser = document.getElementById('currentUser');
+  const logoutBtn = document.getElementById('logoutBtn');
+
+  const messages = [];
+  let loadingTimer = null;
+  let eventSource = null;
+
+  async function checkLoginStatus() {
+    try {
+      const res = await fetch('/api/current-user');
+      if (res.ok) {
+        const data = await res.json();
+        currentUser.textContent = data.username;
+        return true;
+      } else if (res.status === 401) {
+        window.location.href = '/login.html';
+        return false;
+      }
+    } catch (err) {
+      console.error('检查登录状态失败:', err);
+      window.location.href = '/login.html';
+      return false;
+    }
+  }
+
+  async function logout() {
+    try {
+      await fetch('/api/logout', { method: 'POST' });
+      window.location.href = '/login.html';
+    } catch (err) {
+      console.error('退出登录失败:', err);
+      alert('退出登录失败，请重试');
+    }
+  }
+
+  logoutBtn.addEventListener('click', logout);
+  checkLoginStatus();
+
+  async function checkHealth() {
+    try {
+      const res = await fetch('/api/health');
+      const data = await res.json();
+
+      if (data.ok) {
+        serverStatus.textContent = '✓ 服务在线';
+        serverStatus.className = 'status';
+        serverStatus.style.color = '#0a0';
+
+        if (data.projectRoot) {
+          codePath.textContent = data.projectRoot;
+        }
+
+        const metaP = document.querySelector('.meta');
+        if (data.cmd && metaP) {
+          metaP.innerHTML = `
+            绑定项目目录：<code>${data.projectRoot || '未配置'}</code><br />
+            后端命令：<code>echo "你的问题" | ${data.cmd} -p</code><br />
+            <span style="color: #4caf50; font-weight: 500;">✨ v3 版本支持流式输出并沿用标准版 UI</span>
+          `;
+        }
+      } else {
+        serverStatus.textContent = '✗ 服务异常';
+        serverStatus.className = 'status error';
+      }
+    } catch (err) {
+      serverStatus.textContent = '✗ 服务已掉线';
+      serverStatus.className = 'status error';
+      console.error('健康检查失败:', err);
+    }
+  }
+
+  checkHealth();
+  setInterval(checkHealth, 60000);
+
+  renderMessages();
+
+  function timestamp() {
+    const d = new Date();
+    const pad = n => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ` +
+            `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  function scrollToBottom() {
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function renderMessages() {
+    chat.innerHTML = '';
+
+    if (messages.length === 0) {
+      const welcome = document.createElement('div');
+      welcome.style.cssText = 'padding: 40px 20px; text-align: center; color: #666; line-height: 1.8;';
+      welcome.innerHTML = `
+        <div style="font-size: 16px; font-weight: 500; margin-bottom: 20px; color: #333;">
+          你可以向 Claude Code 提问关于你配置的代码库的任何问题，例如：
+        </div>
+        <div style="font-size: 14px; text-align: left; max-width: 600px; margin: 0 auto;">
+          <div style="margin: 12px 0; padding: 8px 12px; background: #f5f5f5; border-radius: 6px;">
+            • "这个项目的整体架构是什么？"
+          </div>
+          <div style="margin: 12px 0; padding: 8px 12px; background: #f5f5f5; border-radius: 6px;">
+            • "请帮我分析 UserController 的实现逻辑"
+          </div>
+          <div style="margin: 12px 0; padding: 8px 12px; background: #f5f5f5; border-radius: 6px;">
+            • "如何优化这个项目的性能？"
+          </div>
+          <div style="margin: 12px 0; padding: 8px 12px; background: #f5f5f5; border-radius: 6px;">
+            • "帮我找出潜在的安全问题"
+          </div>
+        </div>
+      `;
+      chat.appendChild(welcome);
+      return;
+    }
+
+    messages.forEach(msg => {
+      const row = document.createElement('div');
+      row.className = `message-row ${msg.role}`;
+      row.id = msg.id;
+
+      const avatar = document.createElement('div');
+      avatar.className = `avatar ${msg.role}`;
+      avatar.textContent = msg.role === 'user' ? '我' : 'C';
+
+      const wrapper = document.createElement('div');
+
+      const bubble = document.createElement('div');
+      bubble.className = `bubble ${msg.role}`;
+      bubble.id = `bubble-${msg.id}`;
+
+      if (msg.loading) {
+        bubble.classList.add('loading');
+        bubble.innerHTML = '<img src="./images/loading.gif" alt="loading" style="width:16px; height:16px; vertical-align:middle; margin-left:4px;" /> &nbsp;&nbsp;&nbsp;&nbsp;Claude Code 正在思考中...<span id="loadingSeconds" style="color:#666; margin-left:8px;">0秒</span>';
+      } else if (msg.streaming) {
+        bubble.classList.add('streaming');
+        bubble.textContent = msg.content;
+      } else {
+        bubble.textContent = msg.content;
+      }
+
+      const ts = document.createElement('div');
+      ts.className = msg.role === 'user' ? 'right-timestamp' : 'left-timestamp';
+      ts.textContent = msg.time;
+
+      wrapper.appendChild(bubble);
+      wrapper.appendChild(ts);
+
+      if (msg.role === 'user') {
+        row.appendChild(wrapper);
+        row.appendChild(avatar);
+      } else {
+        row.appendChild(avatar);
+        row.appendChild(wrapper);
+      }
+      chat.appendChild(row);
+    });
+    scrollToBottom();
+  }
+
+  function updateMessage(msgId, content, isComplete = false) {
+    const msg = messages.find(m => m.id === msgId);
+    if (!msg) return;
+
+    msg.content = content;
+    msg.streaming = !isComplete;
+    msg.loading = false;
+
+    const bubble = document.getElementById(`bubble-${msgId}`);
+    if (bubble) {
+      bubble.className = `bubble ${msg.role}`;
+      if (!isComplete) {
+        bubble.classList.add('streaming');
+      }
+      bubble.textContent = content;
+      scrollToBottom();
+    }
+  }
+
+  async function sendQuestion() {
+    const question = qInput.value.trim();
+    if (!question) return;
+
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+
+    const useKnowledgeBase = document.getElementById('useKnowledgeBase').checked;
+    const startTime = Date.now();
+
+    const userMsg = {
+      id: Date.now() + '_user',
+      role: 'user',
+      content: question + (useKnowledgeBase ? ' [使用知识库]' : ''),
+      time: timestamp()
+    };
+    messages.push(userMsg);
+
+    const loadingId = Date.now() + '_assistant';
+    messages.push({
+      id: loadingId,
+      role: 'assistant',
+      loading: true,
+      streaming: false,
+      content: '',
+      time: timestamp()
+    });
+
+    renderMessages();
+
+    qInput.value = '';
+    btn.disabled = true;
+    status.textContent = '正在处理...';
+
+    let elapsedSeconds = 0;
+    loadingTimer = setInterval(() => {
+      elapsedSeconds++;
+      const secondsSpan = document.getElementById('loadingSeconds');
+      if (secondsSpan) {
+        secondsSpan.textContent = `${elapsedSeconds}秒`;
+      }
+    }, 1000);
+
+    try {
+      const params = new URLSearchParams({
+        question: question,
+        useKnowledgeBase: useKnowledgeBase ? 'true' : 'false'
+      });
+
+      eventSource = new EventSource(`/api/ask-stream?${params}`);
+
+      let streamContent = '';
+
+      eventSource.addEventListener('data', (event) => {
+        if (loadingTimer) {
+          clearInterval(loadingTimer);
+          loadingTimer = null;
+        }
+        const chunk = event.data;
+        if (chunk) {
+          streamContent += chunk;
+          updateMessage(loadingId, streamContent, false);
+        }
+      });
+
+      eventSource.addEventListener('done', () => {
+        if (loadingTimer) {
+          clearInterval(loadingTimer);
+          loadingTimer = null;
+        }
+        const seconds = Math.round((Date.now() - startTime) / 1000);
+        const finalContent = streamContent + `\n\n【此次分析耗时 ${seconds} 秒】`;
+        updateMessage(loadingId, finalContent, true);
+        status.textContent = '完成';
+        btn.disabled = false;
+        eventSource.close();
+        eventSource = null;
+      });
+
+      eventSource.addEventListener('error', (event) => {
+        if (loadingTimer) {
+          clearInterval(loadingTimer);
+          loadingTimer = null;
+        }
+
+        let errorMsg = '连接错误';
+        if (event.data) {
+          try {
+            const parsed = JSON.parse(event.data);
+            errorMsg = parsed.error || errorMsg;
+          } catch (err) {
+            errorMsg = event.data;
+          }
+        }
+
+        updateMessage(loadingId, `错误：${errorMsg}`, true);
+        status.textContent = '发生错误';
+        btn.disabled = false;
+
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+      });
+
+      eventSource.onerror = (err) => {
+        if (loadingTimer) {
+          clearInterval(loadingTimer);
+          loadingTimer = null;
+        }
+        console.error('EventSource failed:', err);
+        if (err.target && err.target.readyState === EventSource.CLOSED) {
+          updateMessage(loadingId, '错误：连接已关闭，请刷新页面重试', true);
+        }
+        status.textContent = '连接失败';
+        btn.disabled = false;
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+      };
+
+    } catch (err) {
+      if (loadingTimer) {
+        clearInterval(loadingTimer);
+        loadingTimer = null;
+      }
+      updateMessage(loadingId, `网络错误：${err.message}`, true);
+      btn.disabled = false;
+      status.textContent = '发生错误';
+    }
+  }
+
+  btn.onclick = sendQuestion;
+  qInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      sendQuestion();
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    if (loadingTimer) {
+      clearInterval(loadingTimer);
+      loadingTimer = null;
+    }
+  });
+</script>
+</body>
+</html>
