@@ -647,6 +647,188 @@ app.get('/api/knowledge-base/list', requireAuth, (req, res) => {
   });
 });
 
+// 流式输出接口：使用 Server-Sent Events 实时推送 Claude 输出
+app.get('/api/ask-stream', requireAuth, async (req, res) => {
+  const question = req.query.question || '';
+  const useKnowledgeBase = req.query.useKnowledgeBase === 'true';
+  const username = req.username;
+
+  if (!question.trim()) {
+    return res.status(400).json({ error: '问题不能为空' });
+  }
+
+  const startTime = Date.now();
+
+  // 设置 SSE 响应头
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // 禁用 Nginx 缓冲
+
+  // 如果启用知识库，准备知识库内容
+  let knowledgeBaseContent = '';
+  if (useKnowledgeBase) {
+    knowledgeBaseContent = "需要使用资料库内容来回答问题。";
+  }
+
+  // 构建最终问题
+  let finalQuestion = question;
+  if (knowledgeBaseContent) {
+    finalQuestion = `根据md/目录下的知识库内容，回答以下问题：\n${question}`;
+  }
+
+  // 使用 Claude CLI 的流式输出功能
+  const args = [
+    '-p',
+    finalQuestion,
+    '--output-format=stream-json',
+    '--include-partial-messages',
+    '--verbose'
+  ];
+
+  console.log('========== 调用 /api/ask-stream ==========');
+  console.log('[claude-web-stream] user =', username);
+  console.log('[claude-web-stream] cwd =', PROJECT_ROOT);
+  console.log('[claude-web-stream] cmd =', CLAUDE_CMD, args.map(a => JSON.stringify(a)).join(' '));
+  console.log('[claude-web-stream] useKnowledgeBase =', useKnowledgeBase);
+  console.log('[claude-web-stream] question =', JSON.stringify(question));
+
+  let stdoutBuf = '';
+  let stderrBuf = '';
+  let partialLine = ''; // 用于处理不完整的 JSON 行
+  let fullAnswer = ''; // 累积完整的回答文本
+
+  const child = spawn(
+    CLAUDE_CMD,
+    args,
+    {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        NO_COLOR: '1'
+      }
+    }
+  );
+
+  // 发送 SSE 数据的辅助函数
+  function sendSSE(event, data) {
+    res.write(`event: ${event}\n`);
+    // SSE 规范要求：如果 data 包含多行，每行都要以 "data: " 开头
+    const lines = data.split('\n');
+    lines.forEach(line => {
+      res.write(`data: ${line}\n`);
+    });
+    res.write('\n'); // 空行表示消息结束
+  }
+
+  child.on('spawn', () => {
+    console.log('[claude-web-stream] 子进程已启动，pid =', child.pid);
+  });
+
+  // 实时推送 stdout 数据 - 解析流式 JSON
+  child.stdout.on('data', (chunk) => {
+    const text = chunk.toString();
+    console.log(text);
+    stdoutBuf += text;
+
+    // 将数据按行分割并处理
+    const lines = (partialLine + text).split('\n');
+    partialLine = lines.pop() || ''; // 保存不完整的行
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+
+      try {
+        const jsonData = JSON.parse(line);
+        console.log('[claude-web-stream] JSON event:', jsonData.type);
+
+        // 提取流式文本内容
+        if (jsonData.type === 'content_block_delta' &&
+            jsonData.delta &&
+            jsonData.delta.type === 'text_delta' &&
+            jsonData.delta.text) {
+          const textChunk = jsonData.delta.text;
+          console.log('[claude-web-stream] text chunk:', textChunk);
+
+          // 累积完整回答
+          fullAnswer += textChunk;
+
+          // 实时推送文本块到前端
+          sendSSE('data', textChunk);
+        }
+      } catch (err) {
+        console.error('[claude-web-stream] JSON 解析失败:', line, err.message);
+      }
+    }
+  });
+
+  child.stderr.on('data', (chunk) => {
+    const text = chunk.toString();
+    stderrBuf += text;
+    console.log('[claude-web-stream] stderr chunk =\n', text);
+  });
+
+  child.on('error', (err) => {
+    console.log('[claude-web-stream] 子进程 error =', err);
+    sendSSE('error', JSON.stringify({ error: '启动 Claude 子进程失败', detail: err.message }));
+
+    const duration = Math.round((Date.now() - startTime) / 1000);
+    saveToDatabase(username, question, `错误：${err.message}`, duration);
+
+    res.end();
+  });
+
+  child.on('close', (code, signal) => {
+    console.log('[claude-web-stream] 子进程 close, code =', code, ', signal =', signal);
+    console.log('[claude-web-stream] 最终 fullAnswer =\n', fullAnswer);
+    console.log('[claude-web-stream] 最终 stderr =\n', stderrBuf);
+
+    const duration = Math.round((Date.now() - startTime) / 1000);
+
+    if (code !== 0) {
+      const errorMsg = `Claude 退出码非 0: ${code}`;
+      const detail = stderrBuf || stdoutBuf || `signal=${signal}`;
+
+      sendSSE('error', JSON.stringify({ error: errorMsg, detail: detail }));
+      saveToDatabase(username, question, `${errorMsg}\n${detail}`, duration);
+    } else {
+      const answer = fullAnswer || '(没有输出)';
+      saveToDatabase(username, question, answer, duration);
+
+      // 发送完成事件
+      sendSSE('done', JSON.stringify({ duration: duration }));
+    }
+
+    res.end();
+  });
+
+  // 不再需要通过 stdin 传递问题，因为已经通过 -p 参数传递了
+
+  // 超时保护
+  const KILL_TIMEOUT_MS = 5 * 60 * 1000;
+  const timeout = setTimeout(() => {
+    console.log('[claude-web-stream] 超时未返回，强制杀死子进程 pid =', child.pid);
+    child.kill('SIGKILL');
+
+    const duration = Math.round((Date.now() - startTime) / 1000);
+    const errorMsg = '调用 Claude 超时，子进程在超时时间内未退出，已被强制终止';
+
+    sendSSE('error', JSON.stringify({ error: errorMsg }));
+    saveToDatabase(username, question, errorMsg, duration);
+
+    res.end();
+  }, KILL_TIMEOUT_MS);
+
+  // 客户端断开连接时清理
+  req.on('close', () => {
+    clearTimeout(timeout);
+    if (child && !child.killed) {
+      console.log('[claude-web-stream] 客户端断开，杀死子进程 pid =', child.pid);
+      child.kill();
+    }
+  });
+});
+
 // 核心接口：转发问题给 Claude，并基于本地代码库回答
 app.post('/api/ask', requireAuth, async (req, res) => {
   const question = (req.body && req.body.question) || '';

@@ -21,6 +21,9 @@ yarn-error.log*
 logs/
 *.log
 
+md/
+pdf/
+
 # OS
 Thumbs.db
 
